@@ -7,10 +7,12 @@ import java.util.Date;
 import java.util.Iterator;
 import java.util.Map;
 
+import org.elasticsearch.action.count.CountResponse;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.action.search.SearchType;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.client.transport.TransportClient;
+import org.elasticsearch.common.joda.time.DateTime;
 import org.elasticsearch.common.settings.ImmutableSettings;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.InetSocketTransportAddress;
@@ -33,8 +35,9 @@ public class Es2Csv {
         String outputFile   = null;
         String performanceFile=null;
         int start           = 0;
-        int volume          = 5000;
+        int volume          = 2000;
         Boolean append      = false;
+        int endQueryAt    = 0;
 
         for (String s : args) {
             if (s.charAt(1) == 'c') {
@@ -55,6 +58,8 @@ public class Es2Csv {
                 append = new Boolean(s.substring(3));
             }else if (s.charAt(1) == 'p') {
                 performanceFile = s.substring(3);
+            }else if (s.charAt(1) == 'e') {
+                endQueryAt = new Integer(s.substring(3));
             }
         }
 
@@ -70,8 +75,10 @@ public class Es2Csv {
         BufferedWriter perfWriter = json2Csv.writePerformanceHeader(performanceFile, outputFile, append);
         BufferedWriter outputWriter = json2Csv.openFile(outputFile, append);
         ArrayList<String> headerList = json2Csv.writeCSVHeader(json2Csv.readTemplateFile(templateFile), outputWriter);
-        json2Csv.retrieveIndex(cluster, host, indexName, documentType, headerList, outputWriter,
-                               perfWriter, start, volume);
+        json2Csv.scrollSearch(cluster, host, indexName, documentType, headerList, outputWriter,
+                               perfWriter, start, volume, endQueryAt);
+//        json2Csv.retrieveIndex(cluster, host, indexName, documentType, headerList, outputWriter,
+//                               perfWriter, start, volume, endQueryAt);
         json2Csv.closeFile(outputWriter);
     }
 
@@ -79,7 +86,8 @@ public class Es2Csv {
         System.out.println("usage:  java -jar Es2Csv-1.0-SNAPSHOT-jar-with-dependencies.jar ");
         System.out.println("[-c=<cluster>] [-h=<host>] [-i=<index>] [-t=<template file>] [-o=<output file>] " +
                            "[-s=<start position in query>] [-v=<volume of individal requests>] "+
-                           "[-a=<append (true) or overwrite (false-default) output file>]");
+                           "[-a=<append (true) or overwrite (false-default) output file>]" +
+                           "[-e=<There's a bug in ES that some queries don't terminate.  This stops at a record #>]");
         System.out.println("Example:  java -jar Es2Csv-1.0-SNAPSHOT-jar-with-dependencies.jar -c=esava-cluster "+
                            "-h=<host URL> -i=<ES Index> -o=20151006.cvs -s=0 "+
                            "-v=10000 -a=false");
@@ -98,7 +106,8 @@ public class Es2Csv {
 
     //make this recursive so that it gets the whole thing...
     public void retrieveIndex(String cluster, String host, String index, String type, ArrayList<String> headerList,
-                              BufferedWriter outputWriter, BufferedWriter perfWriter, int start, int volume) {
+                              BufferedWriter outputWriter, BufferedWriter perfWriter, int start, int volume,
+                              int endQueryAt) {
 
         int from = 0;
         int size = volume;
@@ -107,18 +116,18 @@ public class Es2Csv {
 
         from = start;
 
-        int retrieveSize = 0;
+        long retrieveSize = (endQueryAt == 0)?getIndexCount(client, index, type):endQueryAt;
 
         int resetClient = 0;
 
         while (from == 0 | retrieveSize > 0) {
-//            if (resetClient > 1000000) {
-//                resetClient = 0;
-//                client = getClient(cluster, host);
-//            }
+//            retrieveSize = getIndexCount(client, index, type);
             try {
                 String startTime = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS").format(new Date());
                 perfWriter.write(startTime + ", ");
+                if(endQueryAt != 0 && from + size >= endQueryAt){
+                    size = endQueryAt - from;
+                }
                 retrieveSize = retrieveIndex(client, index, type, from, size, headerList, outputWriter, perfWriter);
                 from += retrieveSize;
                 resetClient += retrieveSize;
@@ -126,11 +135,25 @@ public class Es2Csv {
                 perfWriter.write(from + ", " + size + ", " + retrieveSize + "," + endTime + "\n");
                 perfWriter.flush();
 
+                if (from == endQueryAt) retrieveSize = -1;  //terminates the query
             }catch (IOException e){
                 System.out.println("error writing performance file");
             }
         }
     }
+
+    public long getIndexCount(Client client, String index, String type) {
+        CountResponse response = client.prepareCount(index)
+                .setTypes(type)
+                .setQuery(QueryBuilders.matchAllQuery())
+                .execute()
+                .actionGet();
+
+        long count = response.getCount();
+
+        return count;
+    }
+
 
     /**
      *
@@ -151,7 +174,7 @@ public class Es2Csv {
         SearchResponse response = client.prepareSearch(index)
                 .setTypes(type)
 //                .setSearchType(SearchType.SCAN)
-                .setScroll(new TimeValue(60000)) //TimeValue?
+//                .setScroll(new TimeValue(60000)) //TimeValue?
                 .setSearchType(SearchType.QUERY_THEN_FETCH)
                 .setQuery(QueryBuilders.matchAllQuery())
                 .setFrom(from).setSize(size).setExplain(true)
@@ -174,6 +197,75 @@ public class Es2Csv {
         return results.length;
 
     }
+
+    public void scrollSearch(String cluster, String host, String index, String type, ArrayList<String> headerList,
+                            BufferedWriter outputWriter, BufferedWriter perfWriter, int start, int volume,
+                            int endQueryAt) {
+        int from = start;
+        DateTime startDate = new DateTime(DateTime.now());
+        Client client = getClient(cluster, host);
+
+        String startTime = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS").format(new Date());
+        SearchResponse scrollResp = client.prepareSearch(index)
+                .setSearchType(SearchType.SCAN)
+                .setScroll(new TimeValue(60000))
+                .setQuery(QueryBuilders.matchAllQuery())
+                .setSize(volume)
+                .execute().actionGet();
+        String endTime = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS").format(new Date());
+        try {
+            perfWriter.write(startTime + ", " + endTime + "," + from + "," + volume + "," + 0 + "," +
+                    new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS").format(new Date()) + "\n");
+        } catch (IOException e){
+            System.out.println("Error writing out initial performance record");
+        }
+        int recsReturned = 0;
+        while (true) {
+            recsReturned = page(client, scrollResp, headerList, outputWriter, perfWriter,start, startTime, volume, from);
+            from += recsReturned;
+            if (recsReturned == 0){
+                DateTime endDate = new DateTime(DateTime.now());
+                long elapsedMS = endDate.getMillis() - startDate.getMillis();
+                int elapsedS = (int) elapsedMS/1000;
+                int recsPerSecond = from/elapsedS;
+                System.out.println("Query Completed:  " + from + " records in " + elapsedS + " =" + from/elapsedS +
+                        "/recsPerSecond");
+                System.out.println("Batch size = " + volume + "/" + volume*5);
+                break;
+            }
+        }
+    }
+
+    private int page(Client client, SearchResponse scrollResp, ArrayList<String> headerList,
+                      BufferedWriter outputWriter, BufferedWriter perfWriter, int start, String startQuery, int volume,
+                      int from) {
+
+        int recsRetunred=0;
+        try {
+            startQuery = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS").format(new Date());
+            perfWriter.write(startQuery + ", ");
+            scrollResp = client.prepareSearchScroll(scrollResp.getScrollId()).
+                    setScroll(new TimeValue(60000)).
+                    execute().actionGet();
+            String endQuery = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS").format(new Date());
+            recsRetunred = scrollResp.getHits().getHits().length;
+            for (SearchHit hit : scrollResp.getHits().getHits()) {
+                Map<String, Object> result = hit.getSource();
+                this.write2Csv(result, headerList, outputWriter);
+            }
+            perfWriter.write(endQuery + ", ");
+            String writeTime = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS").format(new Date());
+            perfWriter.write(from + ", " + volume + ", " + recsRetunred + "," + writeTime + "\n");
+            perfWriter.flush();
+        } catch(IOException e){
+            System.out.println("Error writing performance file");
+            e.printStackTrace();
+        }
+        //Break condition: No hits are returned
+        return recsRetunred;
+    }
+
+
 
     private static TransportClient getClient(String cluster, String host) {
 
@@ -313,6 +405,7 @@ public class Es2Csv {
 
         Map<String, Object> columnMap = resultMap;
         try{
+///*debug*/   int commaCount = 0;
             outputWriter.write((String) columnMap.get(jsonFields.get(0)));
             for(int i = 1; i < jsonFields.size(); i++){  //this is gona happen billions of times...be efficient here!
                 columnMap = resultMap;
@@ -327,9 +420,20 @@ public class Es2Csv {
                 }
                 Object temp = (columnMap == null)?null:columnMap.get(fieldName);
                 field = (temp == null)?null:temp.toString();
-                outputWriter.write("," + ((field == "null" | field == null)?"":field));
+                outputWriter.write("," + ((field == "null" | field == null)?"":"\""+field+"\""));
+//debug
+//                commaCount += 1;
+//                if (fieldName.equalsIgnoreCase("sw_plat")) System.out.println("column: " + (commaCount) + " name: " + fieldName);
+//                if (fieldName.equalsIgnoreCase("sw_plat") && field == "3499"){
+//                    System.out.println("Got an odd ball.  Field:" + fieldName + " value: " + field +
+//                                       " position:" + (commaCount));
+//                }
+//                if (field != null && field.contains(","))System.out.println("Got a field with a comma!  " + "Field:" + fieldName + " value: " + field +
+//                                                            " position:" + commaCount);
+//debug (end)
             }
             outputWriter.write("\n");
+///* debug */ if (commaCount !=309) System.out.println("Fields in row: " + (commaCount +1));
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -343,5 +447,4 @@ public class Es2Csv {
             System.out.println(entry.getKey() + "/" + entry.getValue());
         }
     }
-
 }
