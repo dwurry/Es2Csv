@@ -405,7 +405,6 @@ public class Es2Csv {
 
         Map<String, Object> columnMap = resultMap;
         try{
-///*debug*/   int commaCount = 0;
             outputWriter.write((String) columnMap.get(jsonFields.get(0)));
             for(int i = 1; i < jsonFields.size(); i++){  //this is gona happen billions of times...be efficient here!
                 columnMap = resultMap;
@@ -414,26 +413,21 @@ public class Es2Csv {
                 if (fieldName.contains(".")) {
                     String parent = fieldName.substring(0, fieldName.indexOf('.'));
                     fieldName = fieldName.substring(fieldName.indexOf('.') + 1);
-//                    writeMap(columnMap);
-//                    System.out.println("parent: " + parent + " field: " + fieldName);
                     columnMap = (Map<String, Object>) columnMap.get(parent);
                 }
                 Object temp = (columnMap == null)?null:columnMap.get(fieldName);
                 field = (temp == null)?null:temp.toString();
+//debug
+                if (field != null && field.contains(",") | field.contains("\'") | field.contains("\""))
+                    System.out.println("Got a field with illigal character!  " + "Field:" + fieldName + " value: " + field);
+//debug
                 outputWriter.write("," + ((field == "null" | field == null)?"":"\""+field+"\""));
 //debug
-//                commaCount += 1;
-//                if (fieldName.equalsIgnoreCase("sw_plat")) System.out.println("column: " + (commaCount) + " name: " + fieldName);
-//                if (fieldName.equalsIgnoreCase("sw_plat") && field == "3499"){
-//                    System.out.println("Got an odd ball.  Field:" + fieldName + " value: " + field +
-//                                       " position:" + (commaCount));
-//                }
-//                if (field != null && field.contains(","))System.out.println("Got a field with a comma!  " + "Field:" + fieldName + " value: " + field +
-//                                                            " position:" + commaCount);
+                if (fieldName.equalsIgnoreCase("sw_epShortJoinTime") && field.length() > 10)
+                    System.out.println(" name: " + fieldName + " value: " + field);
 //debug (end)
             }
             outputWriter.write("\n");
-///* debug */ if (commaCount !=309) System.out.println("Fields in row: " + (commaCount +1));
         } catch (IOException e) {
             e.printStackTrace();
         }
