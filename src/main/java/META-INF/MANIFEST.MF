@@ -1,3 +1,3 @@
 Manifest-Version: 1.0
-Main-Class: dwurry.Es2Csv
+Main-Class: dwurry.ReadWriteAdaptor
 

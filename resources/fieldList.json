@@ -118,9 +118,13 @@
       "os_type"
     ],
     [
-      "sa_AuC", 
+      "sa_AuC",
       "sa_AuC"
-    ], 
+    ],
+    [
+      "sa_AuDrp",
+      "sa_AuDrp"
+    ],
     [
       "sa_AuM", 
       "sa_AuM"
@@ -156,6 +160,10 @@
     [
       "sa_AuLpPc",
       "sa_AuLpPc"
+    ],
+    [
+      "sa_AuLsAv",
+      "sa_AuLsAv"
     ],
     [
       "sa_BDRAv", 
@@ -270,6 +278,22 @@
       "sa_Cap"
     ],
     [
+      "sa_Csy80",
+      "sa_Csy80"
+    ],
+    [
+      "sa_CsyAv",
+      "sa_CsyAv"
+    ],
+    [
+      "sa_DeDnMx",
+      "sa_DeDnMx"
+    ],
+    [
+      "sa_DeUpMx",
+      "sa_DeUpMx"
+    ],
+    [
       "sa_endpointJoinTime",
       "sa_endpointJoinTime"
     ],
@@ -328,7 +352,15 @@
     [
       "sa_RPDn", 
       "sa_RPDn"
-    ], 
+    ],
+    [
+      "sa_RttAv",
+      "sa_RttAv"
+    ],
+    [
+      "sa_RttMx",
+      "sa_RttMx"
+    ],
     [
       "sw_build", 
       "sw_build"
